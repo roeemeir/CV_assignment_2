@@ -62,7 +62,21 @@ def main():
                                  right_image.astype(np.float64),
                                  win_size=WIN_SIZE,
                                  dsp_range=DISPARITY_RANGE)
+
     print(f"SSDD calculation done in {toc(tt):.4f}[seconds]")
+
+    #Plot part A
+    # disparity_values = range(-DISPARITY_RANGE, DISPARITY_RANGE+1)
+    # chosen_disparities = [-10, -5, 0, 5, 10]
+    # chosen_disparities_indices = np.where(np.isin(disparity_values, chosen_disparities))[0].astype(int)
+    # plt.figure()
+    # for idx, d in enumerate(chosen_disparities):
+    #     plt.subplot(1, len(chosen_disparities), idx+1)
+    #     curr_disparity_idx = chosen_disparities_indices[idx]
+    #     plt.imshow(ssdd[:, :, chosen_disparities_indices[idx]], cmap='inferno')
+    #     plt.title(f"Disparity = {d}")
+    #     plt.axis('off')
+    # plt.show()
 
     # Construct naive disparity image
     tt = tic()
@@ -70,13 +84,29 @@ def main():
     print(f"Naive labeling done in {toc(tt):.4f}[seconds]")
 
     # plot the left image and the estimated depth
-    fig = plt.figure()
-    plt.subplot(1, 2, 1)
-    plt.imshow(left_image)
-    plt.subplot(1, 2, 2)
-    plt.imshow(label_map)
-    plt.colorbar()
-    plt.title('Naive Depth')
+    # plt.figure()
+    # plt.subplot(1, 2, 1)
+    # plt.imshow(left_image)
+    # plt.subplot(1, 2, 2)
+    # plt.imshow(label_map)
+    # plt.colorbar()
+    # plt.title('Naive Depth')
+    # plt.show()
+
+    # Compute forward map of the left image to the right image.
+    mapped_image_smooth_dp = forward_map(left_image, labels=label_map)
+    # plot left image, forward map image and right image
+    # plt.figure()
+    # plt.subplot(1, 3, 1)
+    # plt.imshow(left_image)
+    # plt.title('Source Image')
+    # plt.subplot(1, 3, 2)
+    # plt.imshow(mapped_image_smooth_dp)
+    # plt.title('Smooth Forward map - Naive')
+    # plt.subplot(1, 3, 3)
+    # plt.imshow(right_image)
+    # plt.title('Right Image')
+    # plt.show()
 
     # Smooth disparity image - Dynamic Programming
     tt = tic()
@@ -84,14 +114,25 @@ def main():
     print(f"Dynamic Programming done in {toc(tt):.4f}[seconds]")
 
     # plot the left image and the estimated depth
-    plt.figure()
-    plt.subplot(1, 2, 1)
-    plt.imshow(left_image)
-    plt.title('Source Image')
-    plt.subplot(1, 2, 2)
-    plt.imshow(label_smooth_dp)
-    plt.colorbar()
-    plt.title('Smooth Depth - DP')
+    # plt.figure()
+    # plt.subplot(1, 2, 1)
+    # plt.imshow(label_map)
+    # plt.title('Source Image')
+    # plt.subplot(1, 2, 2)
+    # plt.imshow(label_smooth_dp)
+    # plt.colorbar()
+    # plt.title('Smooth Depth - DP')
+    # plt.show()
+
+    # Compare naive method and Dynamic Programming
+    # plt.figure()
+    # plt.subplot(1, 2, 1)
+    # plt.imshow(label_map)
+    # plt.title('Naive Method')
+    # plt.subplot(1, 2, 2)
+    # plt.imshow(label_smooth_dp)
+    # plt.title('Dynamic Programming')
+    # plt.show()
 
     # Compute forward map of the left image to the right image.
     mapped_image_smooth_dp = forward_map(left_image, labels=label_smooth_dp)
@@ -106,6 +147,7 @@ def main():
     plt.subplot(1, 3, 3)
     plt.imshow(right_image)
     plt.title('Right Image')
+    plt.show()
 
     # Generate a dictionary which maps each direction to a label map:
     tt = tic()

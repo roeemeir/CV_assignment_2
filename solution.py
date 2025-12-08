@@ -1,7 +1,7 @@
 """Stereo matching."""
 import numpy as np
 from scipy.signal import convolve2d
-
+import matplotlib.pyplot as plt
 
 class Solution:
     def __init__(self):
@@ -32,7 +32,23 @@ class Solution:
         ssdd_tensor = np.zeros((num_of_rows,
                                 num_of_cols,
                                 len(disparity_values)))
-        """INSERT YOUR CODE HERE"""
+
+        kernel = np.ones((win_size, win_size), dtype=np.float64)
+
+        for label_idx, disp in enumerate(disparity_values):
+            right_image_shifted = np.zeros_like(right_image)
+
+            if disp == 0:
+                right_image_shifted[:] = right_image
+            elif disp > 0:
+                right_image_shifted[:, :-disp, :] = right_image[:, disp:, :]
+            else:
+                right_image_shifted[:, -disp:, :] = right_image[:, :disp, :]
+
+            diff_sq = np.sum((left_image - right_image_shifted) ** 2, axis=2)
+
+            ssdd_tensor[:, :, label_idx] = convolve2d(diff_sq, kernel, mode="same", boundary="fill", fillvalue=0.0)
+
         ssdd_tensor -= ssdd_tensor.min()
         ssdd_tensor /= ssdd_tensor.max()
         ssdd_tensor *= 255.0
@@ -54,9 +70,7 @@ class Solution:
         Returns:
             Naive labels HxW matrix.
         """
-        # you can erase the label_no_smooth initialization.
-        label_no_smooth = np.zeros((ssdd_tensor.shape[0], ssdd_tensor.shape[1]))
-        """INSERT YOUR CODE HERE"""
+        label_no_smooth = np.argmin(ssdd_tensor, axis=2)
         return label_no_smooth
 
     @staticmethod
@@ -77,7 +91,34 @@ class Solution:
         """
         num_labels, num_of_cols = c_slice.shape[0], c_slice.shape[1]
         l_slice = np.zeros((num_labels, num_of_cols))
-        """INSERT YOUR CODE HERE"""
+
+        idx = np.arange(num_labels)
+        diff = np.abs(idx[:, None] - idx[None, :])
+
+        neighbor_mask = diff == 1
+        far_mask = diff >= 2
+
+        l_slice[:, 0] = c_slice[:, 0]
+
+        for col in range(1, num_of_cols):
+            prev = l_slice[:, col - 1]
+
+            prev_mat = prev[None, :]
+
+            neigh = np.where(neighbor_mask, prev_mat, np.inf).min(axis=1) + p1
+
+            far = np.where(far_mask, prev_mat, np.inf).min(axis=1) + p2
+
+            m_d = np.minimum.reduce([prev, neigh, far])
+
+            l_slice[:, col] = c_slice[:, col] + m_d - prev.min()
+
+        # plt.figure()
+        # plt.imshow(np.transpose(l_slice))
+        # plt.title('Slices')
+        # plt.colorbar()
+        # plt.title('Smooth Depth - DP')
+        # plt.show()
         return l_slice
 
     def dp_labeling(self,
@@ -102,8 +143,18 @@ class Solution:
             Dynamic Programming depth estimation matrix of shape HxW.
         """
         l = np.zeros_like(ssdd_tensor)
-        """INSERT YOUR CODE HERE"""
-        return self.naive_labeling(l)
+
+        H, W, num_labels = ssdd_tensor.shape
+
+        for row in range(H):
+            c_slice = ssdd_tensor[row, :, :].T
+            l_slice = self.dp_grade_slice(c_slice, p1, p2)
+            l[row, :, :] = l_slice.T
+
+
+        label_smooth_dp = np.argmin(l, axis=2)
+
+        return label_smooth_dp
 
     def dp_labeling_per_direction(self,
                                   ssdd_tensor: np.ndarray,
