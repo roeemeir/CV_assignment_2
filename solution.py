@@ -2,6 +2,7 @@
 import numpy as np
 from scipy.signal import convolve2d
 
+
 class Solution:
     def __init__(self):
         pass
@@ -27,7 +28,7 @@ class Solution:
             HxWx(2*dsp_range+1).
         """
         num_of_rows, num_of_cols = left_image.shape[0], left_image.shape[1]
-        disparity_values = range(-dsp_range, dsp_range+1)
+        disparity_values = range(-dsp_range, dsp_range + 1)
         ssdd_tensor = np.zeros((num_of_rows,
                                 num_of_cols,
                                 len(disparity_values)))
@@ -148,18 +149,17 @@ class Solution:
         label_smooth_dp = np.argmin(l, axis=2)
         return label_smooth_dp
 
-
     def _iter_direction_slices(self, ssdd_tensor: np.ndarray, direction: int):
         """
         Directions (arrows point TOWARD the center):
             1: left  -> right
-            2: top-left  -> bottom-right  (NW->SE)
+            2: top-left  -> bottom-right
             3: top  -> bottom
-            4: top-right -> bottom-left   (NE->SW)
+            4: top-right -> bottom-left
             5: right -> left
-            6: bottom-right -> top-left   (SE->NW)
+            6: bottom-right -> top-left
             7: bottom -> top
-            8: bottom-left -> top-right   (SW->NE)
+            8: bottom-left -> top-right
 
         Returns: list of (c_slice, coords)
             c_slice: (n_labels, N)
@@ -168,25 +168,31 @@ class Solution:
         H, W, n_labels = ssdd_tensor.shape
         slices = []
 
-        # map to canonical kind + reverse flag
-        if   direction == 1: kind, rev = "h",  False
-        elif direction == 5: kind, rev = "h",  True
-        elif direction == 3: kind, rev = "v",  False
-        elif direction == 7: kind, rev = "v",  True
-        elif direction == 2: kind, rev = "md", False  # NW->SE
-        elif direction == 6: kind, rev = "md", True   # SE->NW
-        elif direction == 4: kind, rev = "ad", False  # NE->SW
-        elif direction == 8: kind, rev = "ad", True   # SW->NE
+        if direction == 1:
+            kind, rev = "h", False
+        elif direction == 5:
+            kind, rev = "h", True
+        elif direction == 3:
+            kind, rev = "v", False
+        elif direction == 7:
+            kind, rev = "v", True
+        elif direction == 2:
+            kind, rev = "md", False  # NW->SE
+        elif direction == 6:
+            kind, rev = "md", True  # SE->NW
+        elif direction == 4:
+            kind, rev = "ad", False  # NE->SW
+        elif direction == 8:
+            kind, rev = "ad", True  # SW->NE
         else:
             raise ValueError(f"Invalid direction {direction}")
 
-        # ---------- horizontal & vertical ----------
         if kind in ("h", "v"):
-            if kind == "h":   # rows
+            if kind == "h":
                 rows_mat = np.repeat(np.arange(H)[:, None], W, axis=1)
                 cols_mat = np.repeat(np.arange(W)[None, :], H, axis=0)
                 n_slices = H
-            else:             # "v" -> cols
+            else:
                 rows_mat = np.repeat(np.arange(H)[None, :], W, axis=0)
                 cols_mat = np.repeat(np.arange(W)[:, None], H, axis=1)
                 n_slices = W
@@ -198,14 +204,12 @@ class Solution:
             for i in range(n_slices):
                 rows = rows_mat[i]
                 cols = cols_mat[i]
-                coords = np.column_stack((rows, cols))        # (N, 2)
-                c_slice = ssdd_tensor[rows, cols, :].T        # (n_labels, N)
+                coords = np.column_stack((rows, cols))  # (N, 2)
+                c_slice = ssdd_tensor[rows, cols, :].T  # (n_labels, N)
                 slices.append((c_slice, coords))
             return slices
 
-        # ---------- main diagonals (NW<->SE) ----------
         if kind == "md":
-            # k = col - row
             for k in range(-(H - 1), W):
                 rows = np.arange(H)
                 cols = rows + k
@@ -225,9 +229,7 @@ class Solution:
                 slices.append((c_slice, coords))
             return slices
 
-        # ---------- anti-diagonals (NE<->SW) ----------
         if kind == "ad":
-            # s = row + col
             for s in range(0, H + W - 1):
                 rows = np.arange(H)
                 cols = s - rows
@@ -246,9 +248,6 @@ class Solution:
                 c_slice = ssdd_tensor[r_idx, c_idx, :].T
                 slices.append((c_slice, coords))
             return slices
-
-
-
 
     def dp_labeling_per_direction(self,
                                   ssdd_tensor: np.ndarray,
@@ -285,8 +284,8 @@ class Solution:
             l_dir = np.zeros_like(ssdd_tensor, float)
 
             for c_slice, coords in self._iter_direction_slices(ssdd_tensor, direction):
-                l_slice = self.dp_grade_slice(c_slice, p1, p2)   # (D,L)
-                l_dir[coords[:,0], coords[:,1], :] = l_slice.T   # (L,D)
+                l_slice = self.dp_grade_slice(c_slice, p1, p2)
+                l_dir[coords[:, 0], coords[:, 1], :] = l_slice.T
 
             direction_to_slice[direction] = np.argmin(l_dir, axis=2)
 
@@ -316,5 +315,17 @@ class Solution:
         """
         num_of_directions = 8
         l = np.zeros_like(ssdd_tensor)
-        """INSERT YOUR CODE HERE"""
-        return self.naive_labeling(l)
+        for direction in range(1, num_of_directions + 1):
+
+            l_dir = np.zeros_like(ssdd_tensor, dtype=np.float64)
+
+            for c_slice, coords in self._iter_direction_slices(ssdd_tensor, direction):
+                l_slice = self.dp_grade_slice(c_slice, p1, p2)
+                l_dir[coords[:, 0], coords[:, 1], :] = l_slice.T
+
+            l += l_dir
+
+        l_mean = l / num_of_directions
+        label_smooth_sgm = np.argmin(l_mean, axis=2)
+
+        return label_smooth_sgm
