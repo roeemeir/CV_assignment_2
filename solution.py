@@ -91,22 +91,35 @@ class Solution:
         """
         num_labels, num_of_cols = c_slice.shape[0], c_slice.shape[1]
         l_slice = np.zeros((num_labels, num_of_cols))
-
-        idx = np.arange(num_labels)
-        diff = np.abs(idx[:, None] - idx[None, :])
-
-        neighbor_mask = diff == 1
-        far_mask = diff >= 2
-
         l_slice[:, 0] = c_slice[:, 0]
+
+        neighbor = np.empty(num_labels, dtype=np.float64)
+        prefix_min = np.empty(num_labels, dtype=np.float64)
+        suffix_min = np.empty(num_labels, dtype=np.float64)
+        far_left = np.empty(num_labels, dtype=np.float64)
+        far_right = np.empty(num_labels, dtype=np.float64)
 
         for col in range(1, num_of_cols):
             prev = l_slice[:, col - 1]
-            prev_mat = prev[None, :]
 
-            neigh = np.where(neighbor_mask, prev_mat, np.inf).min(axis=1) + p1
-            far = np.where(far_mask, prev_mat, np.inf).min(axis=1) + p2
-            m_d = np.minimum.reduce([prev, neigh, far])
+            neighbor.fill(np.inf)
+            neighbor[1:] = np.minimum(neighbor[1:], prev[:-1])
+            neighbor[:-1] = np.minimum(neighbor[:-1], prev[1:])
+            neighbor += p1
+
+            np.minimum.accumulate(prev, out=prefix_min)
+            np.minimum.accumulate(prev[::-1], out=suffix_min)
+            suffix_min[:] = suffix_min[::-1]
+
+            far_left.fill(np.inf)
+            far_left[2:] = prefix_min[:-2]
+
+            far_right.fill(np.inf)
+            far_right[:-2] = suffix_min[2:]
+
+            far = np.minimum(far_left, far_right) + p2
+            m_d = np.minimum(prev, neighbor)
+            m_d = np.minimum(m_d, far)
 
             l_slice[:, col] = c_slice[:, col] + m_d - prev.min()
 
@@ -149,8 +162,12 @@ class Solution:
         label_smooth_dp = np.argmin(l, axis=2)
         return label_smooth_dp
 
-    def _iter_direction_slices(self, ssdd_tensor: np.ndarray, direction: int):
+
+    def _get_direction_indices(self, h: int, w: int, direction: int):
         """
+        Return a list of (rows, cols) index arrays for all 1D slices
+        in the given direction.
+
         Directions (arrows point TOWARD the center):
             1: left  -> right
             2: top-left  -> bottom-right
@@ -160,99 +177,74 @@ class Solution:
             6: bottom-right -> top-left
             7: bottom -> top
             8: bottom-left -> top-right
-
-        Returns: list of (c_slice, coords)
-            c_slice: (n_labels, N)
-            coords:  (N, 2)  [row, col]
         """
-        H, W, n_labels = ssdd_tensor.shape
+        rows_all = np.arange(h, dtype=int)
+        cols_all = np.arange(w, dtype=int)
         slices = []
 
         if direction == 1:
-            kind, rev = "h", False
+            kind, rev = "h",  False
         elif direction == 5:
-            kind, rev = "h", True
+            kind, rev = "h",  True
         elif direction == 3:
-            kind, rev = "v", False
+            kind, rev = "v",  False
         elif direction == 7:
-            kind, rev = "v", True
+            kind, rev = "v",  True
         elif direction == 2:
-            kind, rev = "md", False  # NW->SE
+            kind, rev = "md", False
         elif direction == 6:
-            kind, rev = "md", True  # SE->NW
+            kind, rev = "md", True
         elif direction == 4:
-            kind, rev = "ad", False  # NE->SW
+            kind, rev = "ad", False
         elif direction == 8:
-            kind, rev = "ad", True  # SW->NE
+            kind, rev = "ad", True
         else:
             raise ValueError(f"Invalid direction {direction}")
 
-        if kind in ("h", "v"):
-            if kind == "h":
-                rows_mat = np.repeat(np.arange(H)[:, None], W, axis=1)
-                cols_mat = np.repeat(np.arange(W)[None, :], H, axis=0)
-                n_slices = H
-            else:
-                rows_mat = np.repeat(np.arange(H)[None, :], W, axis=0)
-                cols_mat = np.repeat(np.arange(W)[:, None], H, axis=1)
-                n_slices = W
+        if kind == "h":
+            cols = cols_all if not rev else cols_all[::-1]
+            for r in rows_all:
+                rows = np.full(cols.size, r, dtype=int)
+                slices.append((rows, cols))
+            return slices
 
-            if rev:
-                rows_mat = rows_mat[:, ::-1]
-                cols_mat = cols_mat[:, ::-1]
-
-            for i in range(n_slices):
-                rows = rows_mat[i]
-                cols = cols_mat[i]
-                coords = np.column_stack((rows, cols))  # (N, 2)
-                c_slice = ssdd_tensor[rows, cols, :].T  # (n_labels, N)
-                slices.append((c_slice, coords))
+        if kind == "v":
+            rows = rows_all if not rev else rows_all[::-1]
+            for c in cols_all:
+                cols = np.full(rows.size, c, dtype=int)
+                slices.append((rows, cols))
             return slices
 
         if kind == "md":
-            for k in range(-(H - 1), W):
-                rows = np.arange(H)
-                cols = rows + k
-                mask = (cols >= 0) & (cols < W)
-                rows, cols = rows[mask], cols[mask]
-                if rows.size == 0:
+            for k in range(-(h - 1), w):
+                cols = rows_all + k
+                mask = (cols >= 0) & (cols < w)
+                if not mask.any():
                     continue
-
-                lin = rows * W + cols
-                r_idx, c_idx = np.unravel_index(lin, (H, W))
-                coords = np.column_stack((r_idx, c_idx))
+                rows = rows_all[mask]
+                cols = cols[mask]
                 if rev:
-                    coords = coords[::-1]
-
-                r_idx, c_idx = coords[:, 0], coords[:, 1]
-                c_slice = ssdd_tensor[r_idx, c_idx, :].T
-                slices.append((c_slice, coords))
+                    rows = rows[::-1]
+                    cols = cols[::-1]
+                slices.append((rows, cols))
             return slices
 
         if kind == "ad":
-            for s in range(0, H + W - 1):
-                rows = np.arange(H)
-                cols = s - rows
-                mask = (cols >= 0) & (cols < W)
-                rows, cols = rows[mask], cols[mask]
-                if rows.size == 0:
+            for s in range(0, h + w - 1):
+                cols = s - rows_all
+                mask = (cols >= 0) & (cols < w)
+                if not mask.any():
                     continue
-
-                lin = rows * W + cols
-                r_idx, c_idx = np.unravel_index(lin, (H, W))
-                coords = np.column_stack((r_idx, c_idx))
+                rows = rows_all[mask]
+                cols = cols[mask]
                 if rev:
-                    coords = coords[::-1]
-
-                r_idx, c_idx = coords[:, 0], coords[:, 1]
-                c_slice = ssdd_tensor[r_idx, c_idx, :].T
-                slices.append((c_slice, coords))
+                    rows = rows[::-1]
+                    cols = cols[::-1]
+                slices.append((rows, cols))
             return slices
 
-    def dp_labeling_per_direction(self,
-                                  ssdd_tensor: np.ndarray,
-                                  p1: float,
-                                  p2: float) -> dict:
+
+    def dp_labeling_per_direction(self, ssdd_tensor: np.ndarray, p1: float, p2: float) -> dict:
         """Return a dictionary of directions to a Dynamic Programming
         etimation of depth.
 
@@ -277,15 +269,18 @@ class Solution:
             corresponding dynamic programming estimation of depth based on
             that direction.
         """
+        H, W = ssdd_tensor.shape[0:2]
         num_of_directions = 8
         direction_to_slice = {}
 
         for direction in range(1, num_of_directions + 1):
             l_dir = np.zeros_like(ssdd_tensor, float)
-
-            for c_slice, coords in self._iter_direction_slices(ssdd_tensor, direction):
+            idx_list = self._get_direction_indices(H, W, direction)
+            # print("Direction: " + str(direction) + " Size: " + str(len(idx_list)))
+            for rows, cols in idx_list:
+                c_slice = ssdd_tensor[rows, cols, :].T
                 l_slice = self.dp_grade_slice(c_slice, p1, p2)
-                l_dir[coords[:, 0], coords[:, 1], :] = l_slice.T
+                l_dir[rows, cols, :] = l_slice.T
 
             direction_to_slice[direction] = np.argmin(l_dir, axis=2)
 
@@ -313,16 +308,18 @@ class Solution:
         Returns:
             Semi-Global Mapping depth estimation matrix of shape HxW.
         """
+        H, W = ssdd_tensor.shape[0:2]
         num_of_directions = 8
         l = np.zeros_like(ssdd_tensor)
+
         for direction in range(1, num_of_directions + 1):
-
-            l_dir = np.zeros_like(ssdd_tensor, dtype=np.float64)
-
-            for c_slice, coords in self._iter_direction_slices(ssdd_tensor, direction):
+            l_dir = np.zeros_like(ssdd_tensor, float)
+            idx_list = self._get_direction_indices(H, W, direction)
+            print("Direction: " + str(direction) + " Size: " + str(len(idx_list)))
+            for rows, cols in idx_list:
+                c_slice = ssdd_tensor[rows, cols, :].T
                 l_slice = self.dp_grade_slice(c_slice, p1, p2)
-                l_dir[coords[:, 0], coords[:, 1], :] = l_slice.T
-
+                l_dir[rows, cols, :] = l_slice.T
             l += l_dir
 
         l_mean = l / num_of_directions
